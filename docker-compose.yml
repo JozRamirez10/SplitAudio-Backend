@@ -1,0 +1,72 @@
+services:
+  mysql:
+    container_name: split_audio_mysql
+    image: mysql:8
+    restart: unless-stopped
+    ports:
+      - "${DB_EXTERNAL_PORT:-3307}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      TZ: ${TZ:-America/Mexico_City}
+    volumes:
+      - split-audio-mysql-data:/var/lib/mysql
+    networks:
+      - split-audio-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  metube:
+    container_name: split_audio_metube
+    image: alexta69/metube:latest
+    restart: unless-stopped
+    ports:
+      - "${METUBE_PORT}:8081"
+    environment:
+      - YTDLP_ARGS=--no-playlist --force-ipv4
+      - 'YTDL_OPTIONS={"format":"bestaudio/best", "extractaudio":true, "audioformat":"wav", "cookiefile":"/cookies/cookies.txt"}'
+      - DELETE_FILE_ON_TRASHCAN=true
+      - DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT=1
+      - DEFAULT_OPTION_PLAYLIST_STRICT_MODE=true
+      - CLEAR_COMPLETED_AFTER=300
+    volumes:
+      - ${ORCHESTRATOR_SHARED_DIR}:/downloads
+      - ${METUBE_COOKIES_PATH}:/cookies/cookies.txt
+    networks:
+      - split-audio-net
+
+  split-audio-backend:
+    container_name: split_audio_orchestrator
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${PORT}:${PORT}"
+    env_file:
+      - .env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - ${ORCHESTRATOR_SHARED_DIR}:${ORCHESTRATOR_SHARED_DIR}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      metube:
+        condition: service_started
+    networks:
+      - split-audio-net
+
+volumes:
+  split-audio-mysql-data:
+    name: split-audio-mysql-data
+
+networks:
+  split-audio-net:
+    name: split-audio-net
